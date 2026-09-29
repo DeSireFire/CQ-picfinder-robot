@@ -38,13 +38,16 @@ const colorPlan = {
   1: '#343a40',
 };
 
+function getRealTagName(tag) {
+  return tag.origTag || tag;
+}
+
 /**
  * 绘制结果图
  *
- * @param {Object} AKDATA 干员数据
+ * @param {object} AKDATA 干员数据
  * @param {Array} results 结果
  * @param {Array} recTags 识别词条
- * @returns
  */
 function getImg(AKDATA, results, recTags) {
   const ctx = Canvas.createCanvas(fullWidth, fullHeight).getContext('2d');
@@ -92,7 +95,7 @@ function getImg(AKDATA, results, recTags) {
   if (recTags.length === 0) drawCard('无', colorPlan.recTag);
 
   for (const recTag of recTags) {
-    drawCard(recTag, colorPlan.recTag);
+    drawCard(getRealTagName(recTag), colorPlan.recTag);
   }
 
   if (recTags.includes('高级资深干员')) {
@@ -115,7 +118,7 @@ function getImg(AKDATA, results, recTags) {
   for (const { comb, chars } of results) {
     newLine(true);
     for (const tag of comb) {
-      drawCard(tag, colorPlan.tag);
+      drawCard(getRealTagName(tag), colorPlan.tag);
     }
     newLine();
     for (const i of chars) {

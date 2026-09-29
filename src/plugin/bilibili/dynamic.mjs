@@ -1,10 +1,10 @@
-import _ from 'lodash-es';
 import NodeCache from 'node-cache';
 import CQ from '../../utils/CQcode.mjs';
 import humanNum from '../../utils/humanNum.mjs';
 import logError from '../../utils/logError.mjs';
 import { retryGet } from '../../utils/retry.mjs';
-import { purgeLink, purgeLinkInText } from './utils.mjs';
+import { arrayIf } from '../../utils/spread.mjs';
+import { handleImgsByConfig, purgeLink, purgeLinkInText } from './utils.mjs';
 
 export { getDynamicInfo } from './dynamicNew.mjs';
 
@@ -57,16 +57,32 @@ const dynamicCard2msg = async (card, forPush = false) => {
     dyid,
     type,
     uname,
-    card: { item },
+    card: { item, user, origin_user },
   } = parsedCard;
+  const { dynamicLinkPosition, pushIgnoreForwardingSelf } = global.config.bot.bilibili;
 
-  const lines = [`https://t.bilibili.com/${dyid}`, `UP：${CQ.escape(uname)}`, ''];
+  if (
+    type === 1 &&
+    forPush &&
+    ((pushIgnoreForwardingSelf && user.uid === origin_user.info.uid) ||
+      /详情请点击(?:互动)?抽奖查看/.test(item.content))
+  ) {
+    return null;
+  }
 
-  // 推送时过滤抽奖结果
-  if (type === 1 && forPush && item.content.includes('详情请点击互动抽奖查看')) return null;
+  const link = `https://t.bilibili.com/${dyid}`;
+  const lines = [`UP：${CQ.escape(uname)}`, ''];
+
+  if (dynamicLinkPosition !== 'append' && dynamicLinkPosition !== 'none') {
+    lines.unshift(link);
+  }
 
   if (type in formatters) lines.push(...(await formatters[type](parsedCard, forPush)));
   else lines.push(`未知的动态类型 type=${type}`);
+
+  if (dynamicLinkPosition === 'append') {
+    lines.push('', link);
+  }
 
   return {
     type,
@@ -95,7 +111,7 @@ const CACHE_MIN_TTL = 86400;
 const firstSendingFlagCache = new NodeCache({ useClones: false });
 const sendedDynamicIdCache = new NodeCache({ useClones: false });
 
-export const getUserNewDynamicsInfo = async uid => {
+export const getUserNewDynamicsInfo = async (uid, forPush = false) => {
   try {
     const {
       data: {
@@ -107,10 +123,9 @@ export const getUserNewDynamicsInfo = async uid => {
     // 过滤掉太旧的动态
     const { pushCheckInterval } = global.config.bot.bilibili;
     const earliestTime = Date.now() / 1000 - Math.max(3600 * 12, pushCheckInterval * 3);
-    const curDids = _.map(
-      cards.filter(({ desc: { timestamp } }) => timestamp > earliestTime),
-      'desc.dynamic_id_str'
-    );
+    const curDids = cards
+      .filter(({ desc: { timestamp } }) => timestamp > earliestTime)
+      .map(({ desc }) => desc.dynamic_id_str);
     // 拉到的存起来
     const ttl = Math.max(CACHE_MIN_TTL, pushCheckInterval * 10);
     const newDids = new Set(curDids.filter(did => !sendedDynamicIdCache.get(did)));
@@ -124,7 +139,9 @@ export const getUserNewDynamicsInfo = async uid => {
     // 发
     return (
       await Promise.all(
-        cards.filter(({ desc: { dynamic_id_str: did } }) => newDids.has(did)).map(card => dynamicCard2msg(card, true))
+        cards
+          .filter(({ desc: { dynamic_id_str: did } }) => newDids.has(did))
+          .map(card => dynamicCard2msg(card, forPush)),
       )
     ).filter(Boolean);
   } catch (e) {
@@ -157,15 +174,7 @@ const formatters = {
     },
   }) => [
     CQ.escape(purgeLinkInText(description.trim())),
-    ...(global.config.bot.bilibili.dynamicImgPreDl
-      ? await Promise.all(
-          pictures.map(({ img_src }) =>
-            CQ.imgPreDl(img_src, undefined, {
-              timeout: global.config.bot.bilibili.imgPreDlTimeout * 1000,
-            })
-          )
-        )
-      : pictures.map(({ img_src }) => CQ.img(img_src))),
+    ...(await handleImgsByConfig(pictures.map(({ img_src }) => img_src))),
   ],
 
   // 文字动态
@@ -181,20 +190,20 @@ const formatters = {
         `参与人数：${humanNum(join_num)}`,
         '',
         `投票选项（最多选择${choice_cnt}项）`,
-        ...options.flatMap(({ desc, img_url }) => [`- ${desc}`, ...ifArray(img_url, CQ.img(img_url))])
+        ...options.flatMap(({ desc, img_url }) => [`- ${desc}`, ...ifArray(img_url, CQ.img(img_url))]),
       );
     }
     return lines;
   },
 
   // 视频
-  8: ({ card: { aid, bvid, dynamic, pic, title, stat, owner } }) => [
+  8: ({ card: { aid, bvid, dynamic, pic, title, stat, owner } }, forPush = false) => [
     ...ifArray(dynamic, CQ.escape(purgeLinkInText(dynamic.trim())), ''),
     CQ.img(pic),
     `av${aid}`,
     CQ.escape(title.trim()),
     `UP：${CQ.escape(owner.name)}`,
-    `${humanNum(stat.view)}播放 ${humanNum(stat.danmaku)}弹幕`,
+    ...arrayIf(`${humanNum(stat.view)}播放 ${humanNum(stat.danmaku)}弹幕`, !forPush),
     `https://www.bilibili.com/video/${bvid}`,
   ],
 

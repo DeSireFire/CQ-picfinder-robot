@@ -4,9 +4,21 @@ import humanNum from '../../utils/humanNum.mjs';
 import logError from '../../utils/logError.mjs';
 import { retryGet } from '../../utils/retry.mjs';
 
-export const getVideoInfo = async param => {
+const getVideoJumpStr = ({ p, t }) => {
+  const parts = [];
+  if (p) parts.push(`p${p}`);
+  if (t) {
+    const h = Math.floor(t / 3600);
+    const m = Math.floor(t / 60);
+    const s = Math.floor(t % 60);
+    parts.push(`${h > 0 ? `${h}:` : ''}${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`);
+  }
+  return parts.join(', ');
+};
+
+export const getVideoInfo = async (params, jumpParams) => {
   try {
-    const { data } = await retryGet(`https://api.bilibili.com/x/web-interface/view?${stringify(param)}`, {
+    const { data } = await retryGet(`https://api.bilibili.com/x/web-interface/view?${stringify(params)}`, {
       timeout: 10000,
     });
     if (data.code === -404) return { text: '该视频已被删除', reply: true };
@@ -22,6 +34,11 @@ export const getVideoInfo = async param => {
         stat: { view, danmaku },
       },
     } = data;
+
+    const videoJumpText = jumpParams
+      ? `\n空降链接 (${getVideoJumpStr(jumpParams)})\nhttps://www.bilibili.com/video/${bvid}?${stringify(jumpParams)}`
+      : '';
+
     return {
       ids: [aid, bvid],
       text: `${CQ.img(pic)}
@@ -29,10 +46,10 @@ av${aid}
 ${CQ.escape(title)}
 UP：${CQ.escape(name)}
 ${humanNum(view)}播放 ${humanNum(danmaku)}弹幕
-https://www.bilibili.com/video/${bvid}`,
+https://www.bilibili.com/video/${bvid}${videoJumpText}`,
     };
   } catch (e) {
-    logError(`[error] bilibili get video info ${param}`);
+    logError(`[error] bilibili get video info ${params}`);
     logError(e);
     return {};
   }
@@ -59,7 +76,7 @@ UP：${CQ.escape(author)}
 ${humanNum(play)}播放 ${humanNum(video_review)}弹幕
 https://www.bilibili.com/video/${bvid}`,
         };
-      }
+      },
     )
     .catch(e => {
       logError(`[error] bilibili get video info ${keyword}`);

@@ -2,8 +2,8 @@ import CQ from '../../utils/CQcode.mjs';
 import humanNum from '../../utils/humanNum.mjs';
 import logError from '../../utils/logError.mjs';
 import { retryGet } from '../../utils/retry.mjs';
-import { MAGIC_USER_AGENT } from './const.mjs';
-import { purgeLinkInText } from './utils.mjs';
+import { arrayIf } from '../../utils/spread.mjs';
+import { handleImgsByConfig, purgeLinkInText } from './utils.mjs';
 
 const additionalFormatters = {
   // 投票
@@ -25,19 +25,14 @@ const additionalFormatters = {
 
 const majorFormatters = {
   // 图片
-  MAJOR_TYPE_DRAW: async ({ draw: { items } }) => {
-    const { dynamicImgPreDl, imgPreDlTimeout } = global.config.bot.bilibili;
-    return dynamicImgPreDl
-      ? await Promise.all(items.map(({ src }) => CQ.imgPreDl(src, undefined, { timeout: imgPreDlTimeout * 1000 })))
-      : items.map(({ src }) => CQ.img(src));
-  },
+  MAJOR_TYPE_DRAW: ({ draw: { items } }) => handleImgsByConfig(items.map(item => item.src)),
 
   // 视频
-  MAJOR_TYPE_ARCHIVE: ({ archive: { cover, aid, bvid, title, stat } }) => [
+  MAJOR_TYPE_ARCHIVE: ({ archive: { cover, aid, bvid, title, stat } }, forPush = false) => [
     CQ.img(cover),
     `av${aid}`,
     CQ.escape(title?.trim()),
-    `${stat.play}播放 ${stat.danmaku}弹幕`,
+    ...arrayIf(`${stat.play}播放 ${stat.danmaku}弹幕`, !forPush),
     `https://www.bilibili.com/video/${bvid}`,
   ],
 
@@ -67,6 +62,27 @@ const majorFormatters = {
     live_state ? `直播中  ${desc_second}` : '未开播',
     `https://live.bilibili.com/${id}`,
   ],
+  MAJOR_TYPE_LIVE_RCMD: ({ live_rcmd: { content } }) => {
+    const {
+      live_play_info: {
+        cover,
+        title,
+        room_id,
+        live_status,
+        parent_area_name,
+        area_name,
+        watched_show: { text_large },
+      },
+    } = JSON.parse(content);
+    return [
+      CQ.img(cover),
+      CQ.escape(title),
+      `房间号：${room_id}`,
+      `分区：${parent_area_name}・${area_name ? `${area_name}` : ''}`,
+      live_status ? `直播中  ${text_large}` : '未开播',
+      `https://live.bilibili.com/${room_id}`,
+    ];
+  },
 
   // 通用动态？
   MAJOR_TYPE_OPUS: async ({
@@ -74,34 +90,38 @@ const majorFormatters = {
       pics,
       summary: { text },
       title,
+      fold_action: actions,
+      jump_url: url,
     },
   }) => {
     const lines = [];
     if (title) lines.push('', `《${CQ.escape(title.trim())}》`);
-    if (text) lines.push('', CQ.escape(text.trim()));
+    if (actions?.includes('全文')) lines.push('', `全文：https:${url}`);
+    if (text) lines.push('', CQ.escape(purgeLinkInText(text.trim())));
     if (pics.length) {
-      const { dynamicImgPreDl, imgPreDlTimeout } = global.config.bot.bilibili;
-      lines.push(
-        '',
-        ...(dynamicImgPreDl
-          ? await Promise.all(pics.map(({ url }) => CQ.imgPreDl(url, undefined, { timeout: imgPreDlTimeout * 1000 })))
-          : pics.map(({ url }) => CQ.img(url)))
-      );
+      lines.push('', ...(await handleImgsByConfig(pics.map(pic => pic.url))));
     }
     return lines.slice(1);
   },
 };
 
-const formatDynamic = async item => {
+const formatDynamic = async (item, forPush = false) => {
   const { module_author: author, module_dynamic: dynamic } = item.modules;
-  const lines = [`https://t.bilibili.com/${item.id_str}`, `UP：${CQ.escape(author.name)}`];
+  const { dynamicLinkPosition } = global.config.bot.bilibili;
+
+  const link = `https://t.bilibili.com/${item.id_str}`;
+  const lines = [`UP：${CQ.escape(author.name)}`];
+
+  if (dynamicLinkPosition !== 'append' && dynamicLinkPosition !== 'none') {
+    lines.unshift(link);
+  }
 
   const desc = dynamic?.desc?.text?.trim();
   if (desc) lines.push('', CQ.escape(purgeLinkInText(desc)));
 
   const major = dynamic?.major;
   if (major && major.type in majorFormatters) {
-    lines.push('', ...(await majorFormatters[major.type](major)));
+    lines.push('', ...(await majorFormatters[major.type](major, forPush)));
   }
 
   const additional = dynamic?.additional;
@@ -117,19 +137,26 @@ const formatDynamic = async item => {
     }
   }
 
+  if (dynamicLinkPosition === 'append') {
+    lines.push('', link);
+  }
+
   return lines;
 };
 
-export const getDynamicInfoFromItem = async item => {
+export const getDynamicInfoFromItem = async (item, forPush = false) => {
   return {
     id: item.id_str,
     type: item.type,
-    text: (await formatDynamic(item)).join('\n'),
+    isForwardingSelf:
+      item.type === 'DYNAMIC_TYPE_FORWARD' && item.modules.module_author.mid === item.orig.modules.module_author.mid,
+    text: (await formatDynamic(item, forPush)).join('\n'),
   };
 };
 
 export const getDynamicInfo = async id => {
   try {
+    const { cookie } = global.config.bot.bilibili;
     const {
       data: { data, code, message },
     } = await retryGet('https://api.bilibili.com/x/polymer/web-dynamic/v1/detail', {
@@ -139,9 +166,7 @@ export const getDynamicInfo = async id => {
         id,
         features: 'itemOpusStyle',
       },
-      headers: {
-        'User-Agent': MAGIC_USER_AGENT,
-      },
+      headers: cookie ? { Cookie: cookie } : {},
     });
     if (code === 4101131 || code === 4101105) {
       return {

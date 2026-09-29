@@ -1,8 +1,6 @@
-import _ from 'lodash-es';
-import CQ from './CQcode.mjs';
-import { getAntiShieldedCqImg64FromUrl } from './image.mjs';
+import { head, remove, tail } from 'es-toolkit';
 
-const getKey = (img, db) => `${img.file}.${db}`;
+const getKey = (img, db) => `${img.key || img.file}.${db}`;
 
 const CTX_COMPARE_KEY = {
   private: 'user_id',
@@ -41,7 +39,7 @@ class SearchingMap extends Map {
     const ctxs = super.get(key);
     if (!ctxs) throw new Error('no ctxs');
 
-    const mainCtx = _.head(ctxs);
+    const mainCtx = head(ctxs);
     const mainPromises = [];
     const allMsgs = [];
 
@@ -53,7 +51,7 @@ class SearchingMap extends Map {
 
     return {
       reply: async (...msgs) => {
-        _.remove(msgs, msg => !msg);
+        remove(msgs, msg => !msg);
         allMsgs.push(...msgs);
 
         if (needGroupForward) return;
@@ -67,14 +65,14 @@ class SearchingMap extends Map {
         mainPromises.push(promise);
         return promise;
       },
-      end: async ({ file, url }) => {
+      end: async img => {
         await Promise.all(mainPromises);
         super.delete(key);
 
-        const restCtxs = needGroupForward ? ctxs : _.tail(ctxs);
+        const restCtxs = needGroupForward ? ctxs : tail(ctxs);
         const antiShieldingMode = global.config.bot.antiShielding;
         const cqImg =
-          antiShieldingMode > 0 ? await getAntiShieldedCqImg64FromUrl(url, antiShieldingMode) : CQ.img(file);
+          antiShieldingMode > 0 ? (await img.getAntiShieldedCqImg64(antiShieldingMode)) || img.toCQ() : img.toCQ();
 
         for (const ctx of restCtxs) {
           try {
@@ -84,7 +82,7 @@ class SearchingMap extends Map {
               pmSearchResult,
               pmSearchResultTemp,
             });
-          } catch (e) {}
+          } catch {}
         }
       },
     };

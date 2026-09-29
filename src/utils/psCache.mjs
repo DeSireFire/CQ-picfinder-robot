@@ -1,7 +1,8 @@
-import Path from 'path';
-import { encode, decode } from '@msgpack/msgpack';
+import Path from 'node:path';
+import { decode, encode } from '@msgpack/msgpack';
 import Fs from 'fs-extra';
 import klaw from 'klaw-sync';
+import md5 from 'md5';
 import emitter from './emitter.mjs';
 import logError from './logError.mjs';
 import { getDirname } from './path.mjs';
@@ -49,7 +50,16 @@ class PSCache {
    * @private
    */
   getCachePath(img, db) {
-    return Path.resolve(__dirname, '../../data/pscache', `${img.file}.${db}.psc`);
+    let key = img.key || img.file;
+    if (key.includes('/')) {
+      let match;
+      if ((match = /\/\d+-\d+-([0-9a-z]+)\//i.exec(key))) key = match[1];
+      else if ((match = /(?:&|\?)fileid=([^&]+)/.exec(key))) {
+        const parts = match[1].split('_');
+        key = parts[0];
+      }
+    }
+    return Path.resolve(__dirname, '../../data/pscache', `${md5(key)}.${db}.psc`);
   }
 
   /**
@@ -74,7 +84,7 @@ class PSCache {
    *
    * @param {*} img 图片
    * @param {number} db 搜索库
-   * @returns {string[]}
+   * @returns {string[] | undefined}
    */
   get(img, db) {
     const cp = this.getCachePath(img, db);

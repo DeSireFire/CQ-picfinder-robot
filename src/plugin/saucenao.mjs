@@ -1,4 +1,6 @@
-import _ from 'lodash-es';
+import { readFileSync } from 'node:fs';
+import { minBy } from 'es-toolkit';
+import FormData from 'form-data';
 import Axios from '../utils/axiosProxy.mjs';
 import CQ from '../utils/CQcode.mjs';
 import getSource from '../utils/getSource.mjs';
@@ -13,19 +15,23 @@ const snDB = {
   all: 999,
   pixiv: 5,
   danbooru: 9,
+  book: 18,
   doujin: 18,
   anime: 21,
+  原图: 10000,
+  ascii2d: 10001,
+  soutubot: 10002,
 };
 
 /**
- * saucenao搜索
+ * saucenao 搜索
  *
- * @param {string} imgURL 图片地址
+ * @param {MsgImage} img 图片
  * @param {string} db 搜索库
- * @param {boolean} [debug=false] 是否调试
+ * @param {boolean} [debug] 是否调试
  * @returns Promise 返回消息、返回提示
  */
-async function doSearch(imgURL, db, debug = false) {
+async function doSearch(img, db, debug = false) {
   const hosts = global.config.saucenaoHost;
   const apiKeys = global.config.saucenaoApiKey;
   const index = hostsI++;
@@ -39,7 +45,7 @@ async function doSearch(imgURL, db, debug = false) {
   let excess = false;
 
   if (apiKeys[apiKeyIndex]) {
-    await getSearchResult(hosts[hostIndex], apiKeys[apiKeyIndex], imgURL, db)
+    await getSearchResult(hosts[hostIndex], apiKeys[apiKeyIndex], img, db)
       .then(async ret => {
         const data = ret.data;
 
@@ -57,7 +63,7 @@ async function doSearch(imgURL, db, debug = false) {
             const firstSim = data.results[0].header.similarity;
             const pixivIndex = data.results.findIndex(
               // 给一点点权重
-              ({ header: { similarity, index_id } }) => index_id === snDB.pixiv && similarity * 1.03 >= firstSim
+              ({ header: { similarity, index_id } }) => index_id === snDB.pixiv && similarity * 1.03 >= firstSim,
             );
             if (pixivIndex !== -1) {
               const pixivResults = data.results.splice(pixivIndex, 1);
@@ -100,13 +106,11 @@ async function doSearch(imgURL, db, debug = false) {
               const pixivResults = data.results.filter(
                 result =>
                   result.header.index_id === snDB.pixiv &&
-                  _.get(result, 'data.ext_urls[0]') &&
-                  Math.abs(result.header.similarity - similarity) < 5
+                  result?.data?.ext_urls?.[0] &&
+                  Math.abs(result.header.similarity - similarity) < 5,
               );
               if (pixivResults.length > 1) {
-                const result = _.minBy(pixivResults, result =>
-                  parseInt(result.data.ext_urls[0].match(/\d+/).toString())
-                );
+                const result = minBy(pixivResults, result => parseInt(result.data.ext_urls[0].match(/\d+/).toString()));
                 url = result.data.ext_urls[0];
                 title = result.data.title;
                 member_name = result.data.member_name;
@@ -117,14 +121,14 @@ async function doSearch(imgURL, db, debug = false) {
             } else if (ext_urls.length > 1) {
               // 如果结果有多个，优先取 danbooru
               for (let i = 1; i < ext_urls.length; i++) {
-                if (ext_urls[i].indexOf('danbooru') !== -1) url = ext_urls[i];
+                if (ext_urls[i].includes('danbooru')) url = ext_urls[i];
               }
             }
             url = url.replace('http://', 'https://');
             // 获取来源
             if (!source) source = await getSource(url).catch(() => null);
             if (source && source.includes('i.pximg.net')) {
-              source = source.replace(/.*\/(\d+).*?$/, 'https://pixiv.net/i/$1');
+              source = source.replace(/.*\/(\d+).*$/, 'https://pixiv.net/i/$1');
             }
           }
 
@@ -154,7 +158,7 @@ async function doSearch(imgURL, db, debug = false) {
             url: CQ.escape(url),
             title: [`SauceNAO (${simText}%)`, CQ.escape(title)].filter(v => v).join('\n'),
             thumbnail: hideThumbnail ? null : thumbnail,
-            author_url: member_id && url.indexOf('pixiv.net') >= 0 ? `https://pixiv.net/u/${member_id}` : null,
+            author_url: member_id && url.includes('pixiv.net') ? `https://pixiv.net/u/${member_id}` : null,
             source: CQ.escape(source),
           });
 
@@ -204,7 +208,10 @@ async function doSearch(imgURL, db, debug = false) {
       })
       .catch(e => {
         logError(`[error] saucenao[${hostIndex}][request]`);
-        if (e.response) {
+        if (typeof e === 'string') {
+          msg = e;
+          logError(e);
+        } else if (e.response) {
           if (e.response.status === 429) {
             msg = `saucenao-${hostIndex} 搜索次数已达单位时间上限，请稍候再试`;
             excess = true;
@@ -227,9 +234,16 @@ async function doSearch(imgURL, db, debug = false) {
 async function getShareText({ url, title, thumbnail, author_url, source }) {
   const texts = [title];
   if (thumbnail && !global.config.bot.hideImg) {
-    const mode = global.config.bot.antiShielding;
-    if (mode > 0) texts.push(await getAntiShieldedCqImg64FromUrl(thumbnail, mode));
-    else texts.push(await getCqImg64FromUrl(thumbnail));
+    try {
+      const mode = global.config.bot.antiShielding;
+      const image =
+        mode > 0 ? await getAntiShieldedCqImg64FromUrl(thumbnail, mode) : await getCqImg64FromUrl(thumbnail);
+      texts.push(image || '[缩略图获取失败]');
+    } catch (error) {
+      texts.push('[缩略图获取失败]');
+      console.error('[saucenao] get result thumbnail error:', thumbnail);
+      logError(error);
+    }
   }
   if (url) texts.push(confuseURL(url));
   if (author_url) texts.push(`Author: ${confuseURL(author_url)}`);
@@ -242,13 +256,12 @@ async function getShareText({ url, title, thumbnail, author_url, source }) {
  *
  * @param {string} host 自定义 saucenao 的 host
  * @param {string} api_key saucenao api key
- * @param {string} imgURL 欲搜索的图片链接
- * @param {number} [db=999] 搜索库
+ * @param {MsgImage} img 欲搜索的图片
+ * @param {number} [db] 搜索库
  * @returns Axios 对象
  */
-function getSearchResult(host, api_key, imgURL, db = 999) {
-  if (host === 'saucenao.com') host = `https://${host}`;
-  else if (!/^https?:\/\//.test(host)) host = `http://${host}`;
+async function getSearchResult(host, api_key, img, db = 999) {
+  if (!/^https?:\/\//.test(host)) host = `https://${host}`;
 
   const dbParam = {};
   switch (db) {
@@ -263,16 +276,38 @@ function getSearchResult(host, api_key, imgURL, db = 999) {
       break;
   }
 
-  return Axios.get(`${host}/search.php`, {
-    params: {
-      ...(api_key ? { api_key } : {}),
-      ...dbParam,
-      output_type: 2,
-      numres: 3,
-      url: imgURL,
-      hide: global.config.bot.hideImgWhenSaucenaoNSFW,
-    },
-  });
+  const url = `${host}/search.php`;
+  const params = {
+    ...(api_key ? { api_key } : {}),
+    ...dbParam,
+    output_type: 2,
+    numres: 3,
+    hide: global.config.bot.hideImgWhenSaucenaoNSFW,
+  };
+
+  if (global.config.bot.saucenaoLocalUpload || !img.isUrlValid) {
+    const path = await img.getPath();
+    if (path) {
+      const form = new FormData();
+      form.append('file', readFileSync(path), 'image');
+      return Axios.post(url, form, {
+        params,
+        headers: form.getHeaders(),
+      });
+    }
+  }
+
+  if (img.isUrlValid) {
+    return Axios.get(`${host}/search.php`, {
+      params: {
+        ...params,
+        url: img.url,
+      },
+    });
+  }
+
+  // eslint-disable-next-line no-throw-literal
+  throw '部分图片无法获取，如为转发请尝试保存后再手动发送，或使用其他设备手动发送';
 }
 
 export default doSearch;

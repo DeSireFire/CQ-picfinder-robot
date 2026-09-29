@@ -1,11 +1,13 @@
-import { spawn } from 'child_process';
-import { resolve } from 'path';
+import { spawn } from 'node:child_process';
+import { resolve } from 'node:path';
 import AxiosRaw from 'axios';
 import { compare } from 'compare-versions';
+import { transform } from 'es-toolkit/compat';
 import Fs from 'fs-extra';
-import _ from 'lodash-es';
 import removeMd from 'remove-markdown';
 import Axios from './axiosProxy.mjs';
+import { IS_DOCKER } from './env.mjs';
+import { getGhProxyUrl } from './ghProxy.mjs';
 import { getDirname } from './path.mjs';
 
 const __dirname = getDirname(import.meta.url);
@@ -19,7 +21,7 @@ let lastCheck = '0.0.0';
 
 const getLatestVersion = async () => {
   const { data } = await Axios.get(`https://api.github.com/repos/${repoName}/tags?per_page=1`);
-  return _.get(data, '[0].name', '').replace(/^v/, '');
+  return (data?.[0]?.name ?? '').replace(/^v/, '');
 };
 
 export const checkUpdate = async () => {
@@ -27,21 +29,24 @@ export const checkUpdate = async () => {
   if (!latestVersion || lastCheck === latestVersion || compare(version, latestVersion, '>=')) return;
   console.log(`发现新版本：${latestVersion}`);
   const { data: fullChangelog } = await AxiosRaw.get(
-    `https://ghproxy.com/https://raw.githubusercontent.com/${repoName}/v${latestVersion}/CHANGELOG.md`
+    getGhProxyUrl(`https://raw.githubusercontent.com/${repoName}/v${latestVersion}/CHANGELOG.md`),
   );
-  const changelogs = _.transform(
+  const changelogs = transform(
     fullChangelog.split(/\s*###\s*/),
     (arr, text) => {
       text = text.replace(/\n+## .+$/, '');
-      const v = _.get(/^\d+-\d+[ \t]+[vV]([\d.]+)/.exec(text), 1);
+      const v = /^\d+-\d+[ \t]+v([\d.]+)/i.exec(text)?.[1];
       if (!v) return;
       if (compare(version, v, '<')) {
         arr.push('', removeMd(text.trim(), { stripListLeaders: false }));
       }
+      if (arr.length >= 7) return false;
     },
-    [`发现新版本 v${latestVersion}`]
+    [`发现新版本 v${latestVersion}`],
   );
-  changelogs.push('', '实验性更新指令：--update-cqps', '建议在可以登上服务器的状态下使用，以免出现意外起不来（');
+  if (!IS_DOCKER) {
+    changelogs.push('', '实验性更新指令：--update-cqps', '建议在可以登上服务器的状态下使用，以免出现意外起不来（');
+  }
   global.sendMsg2Admin(changelogs.join('\n'));
   lastCheck = latestVersion;
 };

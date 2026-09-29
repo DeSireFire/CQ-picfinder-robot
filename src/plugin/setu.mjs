@@ -1,16 +1,20 @@
-import { URL } from 'url';
-import Jimp from 'jimp';
-import _ from 'lodash-es';
+import { URL } from 'node:url';
+import { pick } from 'es-toolkit';
+import { template } from 'es-toolkit/compat';
 import NamedRegExp from 'named-regexp-groups';
 import urlShorten from '../urlShorten/index.mjs';
 import Axios from '../utils/axiosProxy.mjs';
 import CQ from '../utils/CQcode.mjs';
 import { imgAntiShielding } from '../utils/imgAntiShielding.mjs';
+import Jimp from '../utils/jimp.mjs';
 import logError from '../utils/logError.mjs';
 import logger from '../utils/logger.mjs';
 import { getLocalReverseProxyURL } from './pximg.mjs';
 
-const API_URL = 'https://api.lolicon.app/setu/v2';
+const API_URL = () => {
+  const { setuApiHost } = global.config;
+  return /^https?:\/\//.test(setuApiHost) ? `${setuApiHost}/setu/v2` : `https://${setuApiHost}/setu/v2`;
+};
 
 const PIXIV_404 = Symbol('Pixiv image 404');
 
@@ -18,7 +22,7 @@ async function dlImgAndAntiShielding(url) {
   const setting = global.config.bot.setu;
   const proxy = setting.pximgProxy.trim();
   const img = await Jimp.read(
-    proxy ? Buffer.from(await Axios.get(url, { responseType: 'arraybuffer' }).then(r => r.data)) : url
+    proxy ? Buffer.from(await Axios.get(url, { responseType: 'arraybuffer' }).then(r => r.data)) : url,
   );
   return await imgAntiShielding(img, global.config.bot.setu.antiShielding);
 }
@@ -32,7 +36,7 @@ async function getAntiShieldingBase64(url, fallbackUrl) {
   try {
     const origBase64 = await dlImgAndAntiShielding(url);
     if (checkBase64RealSize(origBase64)) return origBase64;
-  } catch (error) {
+  } catch {
     // 原图过大
   }
   if (!fallbackUrl) return;
@@ -97,7 +101,7 @@ function sendSetu(context, reply = true) {
   }
 
   let success = false;
-  Axios.post(API_URL, { r18, tag: keyword, size: ['original', 'regular'], proxy: null })
+  Axios.post(API_URL(), { r18, tag: keyword, size: ['original', 'regular'], proxy: null, excludeAI: setting.excludeAI })
     .then(ret => ret.data)
     .then(async ret => {
       if (ret.error) return global.replyMsg(context, ret.error, false, reply);
@@ -167,7 +171,7 @@ function sendSetu(context, reply = true) {
         global
           .replyMsg(context, base64 ? CQ.img64(base64, imgType) : CQ.img(url, imgType))
           .then(r => {
-            const message_id = _.get(r, 'data.message_id');
+            const message_id = r?.data?.message_id;
             if (delTime > 0 && message_id)
               setTimeout(() => {
                 global.bot('delete_msg', { message_id });
@@ -196,6 +200,6 @@ export default sendSetu;
 
 function getSetuUrlByTemplate(tpl, setu, url) {
   const path = new URL(url).pathname.replace(/^\//, '');
-  if (!/{{.+}}/.test(tpl)) return new URL(path, tpl).href;
-  return _.template(tpl, { interpolate: /{{([\s\S]+?)}}/g })({ path, ..._.pick(setu, ['pid', 'p', 'uid', 'ext']) });
+  if (!/\{\{.+\}\}/.test(tpl)) return new URL(path, tpl).href;
+  return template(tpl, { interpolate: /\{\{([\s\S]+?)\}\}/g })({ path, ...pick(setu, ['pid', 'p', 'uid', 'ext']) });
 }

@@ -1,4 +1,4 @@
-import _ from 'lodash-es';
+import { each, size, transform } from 'es-toolkit/compat';
 import CQ from '../../utils/CQcode.mjs';
 import emitter from '../../utils/emitter.mjs';
 import logError from '../../utils/logError.mjs';
@@ -23,7 +23,7 @@ emitter.onConfigLoad(init);
 /**
  * @param {keyof typeof pushConfig} key
  */
-const hasConfig = key => !!_.size(pushConfig[key]);
+const hasConfig = key => !!size(pushConfig[key]);
 
 function init() {
   if (checkPushTask) {
@@ -58,7 +58,7 @@ function getPushConfig() {
   const live = {};
   const season = {};
   const series = {};
-  _.each(global.config.bot.bilibili.push, (confs, uid) => {
+  each(global.config.bot.bilibili.push, (confs, uid) => {
     if (!Array.isArray(confs)) return;
     dynamic[uid] = [];
     live[uid] = [];
@@ -114,7 +114,7 @@ async function checkPush() {
   if (hasConfig('series')) {
     checks.push(checkSeason('series').catch(getCheckErrorHandler('series')));
   }
-  const tasks = _.flatten(await Promise.all(checks));
+  const tasks = (await Promise.all(checks)).flat();
   for (const task of tasks) {
     await task();
     await sleep(1000);
@@ -125,8 +125,8 @@ async function checkDynamic() {
   const dynamicMap = {};
   await Promise.all(
     Object.keys(pushConfig.dynamic).map(async uid => {
-      dynamicMap[uid] = await getUserNewDynamicsInfo(uid);
-    })
+      dynamicMap[uid] = await getUserNewDynamicsInfo(uid, true);
+    }),
   );
   const tasks = [];
   for (const [uid, confs] of Object.entries(pushConfig.dynamic)) {
@@ -139,7 +139,7 @@ async function checkDynamic() {
           global.sendGroupMsg(gid, atAll ? `${text}\n\n${CQ.atAll()}` : text).catch(e => {
             console.error(`[BilibiliPush] push dynamic to group ${gid}`);
             logError(e);
-          })
+          }),
         );
       }
     }
@@ -162,12 +162,12 @@ async function checkLive() {
           global
             .sendGroupMsg(
               gid,
-              [CQ.img(cover), `【${name}】${title}`, purgeLink(url), ...(atAll ? [CQ.atAll()] : [])].join('\n')
+              [CQ.img(cover), `【${name}】${title}`, purgeLink(url), ...(atAll ? [CQ.atAll()] : [])].join('\n'),
             )
             .catch(e => {
               console.error(`[BilibiliPush] push live to group ${gid}`);
               logError(e);
-            })
+            }),
         );
       }
     }
@@ -183,7 +183,7 @@ async function checkSeason(type) {
   await Promise.all(
     Object.keys(pushConfig[type]).map(async usid => {
       map[usid] = await getUserSeasonNewVideosInfo(usid, type);
-    })
+    }),
   );
   const tasks = [];
   for (const [usid, confs] of Object.entries(pushConfig[type])) {
@@ -195,7 +195,7 @@ async function checkSeason(type) {
           global.sendGroupMsg(gid, atAll ? `${text}\n\n${CQ.atAll()}` : text).catch(e => {
             console.error(`[BilibiliPush] push ${type} video to group ${gid}`);
             logError(e);
-          })
+          }),
         );
       }
     }
@@ -209,7 +209,7 @@ async function checkFeed() {
     dynamicFeed = null;
     const sendNotice = () =>
       global.sendMsg2Admin(
-        '哔哩哔哩cookie已过期，推送暂停，请配置新cookie后重载配置以重新启用推送（该提醒每6小时重复提醒一次）'
+        '哔哩哔哩cookie已过期，推送暂停，请配置新cookie后重载配置以重新启用推送（该提醒每6小时重复提醒一次）',
       );
     checkFeedTask = setInterval(sendNotice, 6 * 3600 * 1000);
     sendNotice();
@@ -230,30 +230,31 @@ async function checkFeed() {
 /**
  * @param {any[]} items
  * @param {(item: any) => boolean} filter
- * @returns {Record<string, Promise<{ id: string; type: string; text: string }>[]>}
+ * @returns {Record<string, Promise<{ id: string; type: string; isForwardingSelf: boolean; text: string }>[]>}
  */
 function getFeedMap(items, filter) {
-  return _.transform(
+  return transform(
     items.filter(filter),
     (map, item) => {
       const uid = String(item.modules.module_author.mid);
       if (!(uid in map)) map[uid] = [];
-      map[uid].push(getDynamicInfoFromItem(item));
+      map[uid].push(getDynamicInfoFromItem(item, true));
     },
-    {}
+    {},
   );
 }
 
 async function handleFeedDynamic(items) {
   const dynamicMap = getFeedMap(items, ({ modules }) => String(modules.module_author.mid) in pushConfig.dynamic);
   const tasks = [];
+  const { pushIgnoreForwardingSelf } = global.config.bot.bilibili;
   for (const [uid, confs] of Object.entries(pushConfig.dynamic)) {
     const dynamics = dynamicMap[uid];
     if (!dynamics?.length) continue;
-    for await (const { id, type, text } of dynamics) {
-      if (text.includes('详情请点击互动抽奖查看')) continue;
+    for await (const { id, type, isForwardingSelf, text } of dynamics) {
+      if ((pushIgnoreForwardingSelf && isForwardingSelf) || /详情请点击(?:互动)?抽奖查看/.test(text)) continue;
       for (const { gid, atAll, onlyVideo } of confs) {
-        if (onlyVideo && type !== 'MAJOR_TYPE_ARCHIVE') continue;
+        if (onlyVideo && type !== 'DYNAMIC_TYPE_AV') continue;
         tasks.push(() => {
           if (global.config.bot.debug) console.log(`[BilibiliPush] push dynamic ${id} to group ${gid}`);
           return global.sendGroupMsg(gid, atAll ? `${text}\n\n${CQ.atAll()}` : text).catch(e => {

@@ -1,9 +1,12 @@
+import { readFileSync } from 'node:fs';
 import * as Cheerio from 'cheerio';
 import FormData from 'form-data';
-import _ from 'lodash-es';
 import Axios from '../utils/axiosProxy.mjs';
+import { cloudflareBypassForScraping } from '../utils/cloudflareBypassForScraping.mjs';
 import CQ from '../utils/CQcode.mjs';
-import { getCqImg64FromUrl, getAntiShieldedCqImg64FromUrl } from '../utils/image.mjs';
+import { flareSolverr } from '../utils/flareSolverr.mjs';
+import { getAntiShieldedCqImg64FromUrl, getCqImg64FromUrl } from '../utils/image.mjs';
+import { imgAntiShieldingFromArrayBuffer } from '../utils/imgAntiShielding.mjs';
 import logError from '../utils/logError.mjs';
 import { retryAsync } from '../utils/retry.mjs';
 import { confuseURL } from '../utils/url.mjs';
@@ -13,22 +16,16 @@ let hostsI = 0;
 /**
  * ascii2d 搜索
  *
- * @param {string} url 图片地址
+ * @param {MsgImage} img 图片
  * @returns 色合検索 和 特徴検索 结果
  */
-async function doSearch(url, snLowAcc = false) {
+async function doSearch(img, snLowAcc = false) {
   const hosts = global.config.ascii2dHost;
   let host = hosts[hostsI++ % hosts.length];
-  if (host === 'ascii2d.net') host = `https://${host}`;
-  else if (!/^https?:\/\//.test(host)) host = `http://${host}`;
-  const callApi = global.config.bot.ascii2dUsePuppeteer
-    ? callAscii2dUrlApiWithPuppeteer
-    : global.config.bot.ascii2dLocalUpload
-    ? callAscii2dUploadApi
-    : callAscii2dUrlApi;
+  if (!/^https?:\/\//.test(host)) host = `https://${host}`;
   const { colorURL, colorDetail } = await retryAsync(
     async () => {
-      const ret = await callApi(host, url);
+      const ret = await callAscii2dApi(host, img);
       const colorURL = ret.request.res.responseUrl;
       if (!colorURL.includes('/color/')) {
         const $ = Cheerio.load(ret.data, { decodeEntities: false });
@@ -42,12 +39,10 @@ async function doSearch(url, snLowAcc = false) {
       };
     },
     3,
-    e => String(_.get(e, 'response.data')).trim() === 'first byte timeout'
+    e => typeof e !== 'string' && String(e?.response?.data).trim() === 'first byte timeout',
   );
   const bovwURL = colorURL.replace('/color/', '/bovw/');
-  const bovwDetail = await (global.config.bot.ascii2dUsePuppeteer ? getAscii2dWithPuppeteer : Axios.cfGet)(
-    bovwURL
-  ).then(r => getDetail(r, host));
+  const bovwDetail = await requestGet(bovwURL).then(r => getDetail(r, host));
   const colorRet = await getResult(colorDetail, snLowAcc);
   const bovwRet = await getResult(bovwDetail, snLowAcc);
   return {
@@ -57,24 +52,50 @@ async function doSearch(url, snLowAcc = false) {
   };
 }
 
-function callAscii2dUrlApi(host, imgUrl) {
-  return Axios.cfGet(`${host}/search/url/${imgUrl}`);
+function throwDeviceImageError() {
+  // eslint-disable-next-line no-throw-literal
+  throw '部分图片无法获取，如为转发请尝试保存后再手动发送，或使用其他设备手动发送';
 }
 
-async function callAscii2dUploadApi(host, imgUrl) {
-  const imgBuffer = await Axios.get(imgUrl, { responseType: 'arraybuffer' }).then(r => r.data);
-  const form = new FormData();
-  form.append('file', imgBuffer, 'image');
-  return Axios.cfPost(`${host}/search/file`, form, { headers: form.getHeaders() });
+/**
+ * @param {string} host
+ * @param {MsgImage} img
+ */
+async function callAscii2dApi(host, img) {
+  if (global.config.cloudflareBypassForScraping.enableForAscii2d) {
+    if (!img.isUrlValid) throwDeviceImageError();
+    return cloudflareBypassForScraping.get(`${host}/search/url/${img.url}`);
+  }
+
+  if (global.config.flaresolverr.enableForAscii2d) {
+    if (!img.isUrlValid) throwDeviceImageError();
+    return flareSolverr.get(`${host}/search/url/${img.url}`);
+  }
+
+  if (global.config.bot.ascii2dLocalUpload || !img.isUrlValid) {
+    const path = await img.getPath();
+    if (path) {
+      const form = new FormData();
+      form.append('file', readFileSync(path), 'image');
+      return Axios.post(`${host}/search/file`, form, { headers: form.getHeaders() });
+    }
+  }
+
+  if (img.isUrlValid) {
+    return Axios.get(`${host}/search/url/${img.url}`);
+  }
+
+  throwDeviceImageError();
 }
 
-function callAscii2dUrlApiWithPuppeteer(host, imgUrl) {
-  return getAscii2dWithPuppeteer(`${host}/search/url/${imgUrl}`);
-}
-
-async function getAscii2dWithPuppeteer(url) {
-  const { puppeteer } = await import('../../libs/puppeteer/index.mjs');
-  return await puppeteer.get(url, 'body > .container');
+function requestGet(url) {
+  if (global.config.cloudflareBypassForScraping.enableForAscii2d) {
+    return retryAsync(() => cloudflareBypassForScraping.get(url));
+  }
+  if (global.config.flaresolverr.enableForAscii2d) {
+    return retryAsync(() => flareSolverr.get(url));
+  }
+  return Axios.get(url);
 }
 
 /**
@@ -125,10 +146,25 @@ function getDetail(ret, baseURL) {
 async function getResult({ url, title, author, thumbnail, author_url }, snLowAcc = false) {
   if (!title) return { success: false, result: '由未知错误导致搜索失败' };
   const texts = [CQ.escape(author ? `「${title}」/「${author}」` : title)];
-  if (thumbnail && !(global.config.bot.hideImg || (snLowAcc && global.config.bot.hideImgWhenLowAcc))) {
-    const mode = global.config.bot.antiShielding;
-    if (mode > 0) texts.push(await getAntiShieldedCqImg64FromUrl(thumbnail, mode));
-    else texts.push(await getCqImg64FromUrl(thumbnail));
+  try {
+    if (thumbnail && !(global.config.bot.hideImg || (snLowAcc && global.config.bot.hideImgWhenLowAcc))) {
+      const mode = global.config.bot.antiShielding;
+      if (global.config.cloudflareBypassForScraping.enableForAscii2d) {
+        const img = await cloudflareBypassForScraping.getImage(thumbnail);
+        texts.push(CQ.img64(mode > 0 ? await imgAntiShieldingFromArrayBuffer(img, mode) : img));
+      } else if (global.config.flaresolverr.enableForAscii2d) {
+        const img = await flareSolverr.getImage(thumbnail);
+        texts.push(CQ.img64(mode > 0 ? await imgAntiShieldingFromArrayBuffer(img, mode) : img));
+      } else {
+        texts.push(
+          mode > 0 ? await getAntiShieldedCqImg64FromUrl(thumbnail, mode) : await getCqImg64FromUrl(thumbnail),
+        );
+      }
+    }
+  } catch (error) {
+    texts.push('[缩略图获取失败]');
+    console.error('[ascii2d] get result thumbnail error:', thumbnail);
+    logError(error);
   }
   if (url) texts.push(CQ.escape(confuseURL(url)));
   if (author_url) texts.push(`Author: ${CQ.escape(confuseURL(author_url))}`);

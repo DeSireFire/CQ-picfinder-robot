@@ -1,7 +1,7 @@
-import Path from 'path';
+import Path from 'node:path';
 import { AxiosError } from 'axios';
+import { omit } from 'es-toolkit';
 import Fs from 'fs-extra';
-import _ from 'lodash-es';
 import NodeCache from 'node-cache';
 import { checkUpdate } from './checkUpdate.mjs';
 import emitter from './emitter.mjs';
@@ -60,9 +60,12 @@ class Logger {
       setTimeout(() => {
         checkUpdate().catch(handleCheckUpdateError);
       }, 60 * 1000);
-      setInterval(() => {
-        checkUpdate().catch(handleCheckUpdateError);
-      }, Math.min(3600000 * checkUpdateIntervalHours, 2 ** 31 - 1));
+      setInterval(
+        () => {
+          checkUpdate().catch(handleCheckUpdateError);
+        },
+        Math.min(3600000 * checkUpdateIntervalHours, 2 ** 31 - 1),
+      );
     }
   }
 
@@ -82,7 +85,7 @@ class Logger {
   }
 
   checkBan({ user_id, group_id, guild_id }) {
-    if (global.config.bot.ignoreOfficialBot && 2854196300 <= user_id && user_id <= 2854216399) return true;
+    if (global.config.bot.ignoreOfficialBot && user_id >= 2854196300 && user_id <= 2854216399) return true;
     if (banList.u.has(user_id)) return true;
     if (group_id && banList.g.has(group_id)) return true;
     if (guild_id && banList.guild.has(guild_id)) return true;
@@ -170,7 +173,7 @@ class Logger {
    */
   smStatus(g, u) {
     const sm = this.searchMode.get(`${g}-${u}`);
-    if (!_.get(sm, 'enable')) return false;
+    if (!sm?.enable) return false;
     return sm.db;
   }
 
@@ -227,7 +230,7 @@ class Logger {
    *
    * @param {number|string} u QQ号
    * @param {*} limit 限制
-   * @param {'search' | 'setu'} [key='search']
+   * @param {'search' | 'setu'} [key]
    * @returns 允许则返回 true，否则返回 false
    * @memberof Logger
    */
@@ -259,7 +262,7 @@ class Logger {
 
     if (result) {
       sc.count++;
-      if (sc._) sc._ = _.omit(sc, ['count', '_']);
+      if (sc._) sc._ = omit(sc, ['count', '_']);
       if (key === 'setu' && limit.cd) sc.date = Date.now();
     }
     return result;
@@ -269,7 +272,7 @@ class Logger {
    * 释放配额
    *
    * @param {number|string} u QQ号
-   * @param {'search' | 'setu'} [key='search']
+   * @param {'search' | 'setu'} [key]
    * @memberof Logger
    */
   releaseQuota(u, key = 'search') {
@@ -306,7 +309,7 @@ function sendSmNoImgNotice({ group, user, count }) {
       user_id: user,
     },
     '⚠️未在本次搜图模式中收到过图片',
-    true
+    true,
   );
 }
 

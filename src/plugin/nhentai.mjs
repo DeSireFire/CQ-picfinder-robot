@@ -1,16 +1,10 @@
 import * as Cheerio from 'cheerio';
-import NHentaiApi from 'nhentai-api';
 import Axios from '../utils/axiosProxy.mjs';
+import { cloudflareBypassForScraping } from '../utils/cloudflareBypassForScraping.mjs';
+import { flareSolverr } from '../utils/flareSolverr.mjs';
 
-const exts = {
-  j: 'jpg',
-  p: 'png',
-  g: 'gif',
-};
-
-const nhentai = new NHentaiApi();
-
-const getSearchURL = keyword => encodeURI(nhentai.search(keyword));
+const getSearchURL = keyword =>
+  `https://nhentai.net/api/v2/search?query=${encodeURIComponent(keyword)}&sort=date&page=1`;
 
 /**
  * nhentai搜索
@@ -23,14 +17,13 @@ export default name => {
   return mirrorOrigin ? getDetailFromWebsite(mirrorOrigin, name) : getDetailFromNHentaiAPI(name);
 };
 
-async function getJsonWithPuppeteer(url) {
-  const { puppeteer } = await import('../../libs/puppeteer/index.mjs');
-  return await puppeteer.getJSON(url);
-}
-
 async function getDetailFromNHentaiAPI(name) {
-  const get = global.config.bot.nHentaiUsePuppeteer ? getJsonWithPuppeteer : Axios.get;
-  let json = await get(getSearchURL(`${name} chinese`)).then(r => r.data);
+  const get = global.config.cloudflareBypassForScraping.enableForNHentai
+    ? cloudflareBypassForScraping.getJSON
+    : global.config.flaresolverr.enableForNHentai
+      ? flareSolverr.getJSON
+      : Axios.get;
+  let json = await get(getSearchURL(`language:"chinese" ${name}`)).then(r => r.data);
   if (json.result.length === 0) {
     json = await get(getSearchURL(name)).then(r => r.data);
     if (json.result.length === 0) return;
@@ -39,7 +32,7 @@ async function getDetailFromNHentaiAPI(name) {
 
   return {
     url: `https://nhentai.net/g/${data.id}/`,
-    thumb: `https://t.nhentai.net/galleries/${data.media_id}/cover.${exts[data.images.thumbnail.t]}`,
+    thumb: `https://t.nhentai.net/${data.thumbnail}`,
   };
 }
 
@@ -48,7 +41,13 @@ async function getDetailFromWebsite(origin, name) {
 }
 
 async function _getDetailFromWebsite(origin, name) {
-  const { data } = await Axios.get(`${origin}/search/?q=${encodeURIComponent(name)}`, { responseType: 'text' });
+  const get = global.config.cloudflareBypassForScraping.enableForNHentai
+    ? cloudflareBypassForScraping.get
+    : global.config.flaresolverr.enableForNHentai
+      ? flareSolverr.get
+      : Axios.get;
+
+  const { data } = await get(`${origin}/search/?q=${encodeURIComponent(name)}`, { responseType: 'text' });
   const $ = Cheerio.load(data);
 
   const gallery = $('.gallery').get(0);
@@ -60,8 +59,14 @@ async function _getDetailFromWebsite(origin, name) {
   const url = `https://nhentai.net${href}`;
 
   const $img = $gallery.find('img');
-  const thumb = $img.attr('data-src') || $img.attr('src');
+  let thumb = $img.attr('data-src') || $img.attr('src');
   if (!thumb) return;
+
+  if (thumb.startsWith('//')) {
+    thumb = `https:${thumb}`;
+  } else if (!/^https?:\/\//.test(thumb)) {
+    thumb = `https://${thumb}`;
+  }
 
   return { url, thumb };
 }

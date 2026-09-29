@@ -1,0 +1,8 @@
+services:
+  cqps:
+    image: tsuk1ko/cq-picsearcher-bot
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./data:/app/data
+      - ./config.jsonc:/app/config.jsonc

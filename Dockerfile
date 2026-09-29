@@ -1,0 +1,22 @@
+FROM node:24-alpine as build
+
+COPY . /app
+
+WORKDIR /app
+
+RUN  npm install -g bun \
+  && npm run prepare:docker \
+  && bun install
+
+
+FROM node:24-alpine
+
+COPY --from=build /app /app
+
+WORKDIR /app
+
+VOLUME /app/data
+
+ENV CQPS_DOCKER=1 TZ=Asia/Shanghai
+
+CMD [ "node", "index.mjs" ]

@@ -1,7 +1,5 @@
-import _ from 'lodash-es';
 import NodeCache from 'node-cache';
 import CQ from '../../utils/CQcode.mjs';
-import humanNum from '../../utils/humanNum.mjs';
 import logError from '../../utils/logError.mjs';
 import { retryGet } from '../../utils/retry.mjs';
 
@@ -20,14 +18,12 @@ export const getUserSeasonNewVideosInfo = async (usid, type) => {
       type === 'season'
         ? `https://api.bilibili.com/x/polymer/space/seasons_archives_list?mid=${uid}&season_id=${sid}&sort_reverse=false&page_num=1&page_size=10`
         : `https://api.bilibili.com/x/series/archives?mid=${uid}&series_id=${sid}&only_normal=true&sort=desc&pn=1&ps=10`,
-      { timeout: 10000 }
+      { timeout: 10000 },
     );
 
     if (data.code !== 0) {
       if (type === 'season' && data.code === -404) {
-        logError(
-          `[error] 获取不到视频合集信息，请检查 uid=${uid} sid=${sid} 是否是视频列表而不是视频合集`
-        );
+        logError(`[error] 获取不到视频合集信息，请检查 uid=${uid} sid=${sid} 是否是视频列表而不是视频合集`);
         return;
       }
       logError(`[error] bilibili get ${type} (${data.code})`, data.message);
@@ -40,9 +36,7 @@ export const getUserSeasonNewVideosInfo = async (usid, type) => {
     // 拉到的有问题
     if (!(aids && aids.length) || !(archives && archives.length)) {
       if (type === 'series') {
-        logError(
-          `[error] 获取不到视频列表信息，请检查 uid=${uid} sid=${sid} 是否是视频合集而不是视频列表`
-        );
+        logError(`[error] 获取不到视频列表信息，请检查 uid=${uid} sid=${sid} 是否是视频合集而不是视频列表`);
       }
       return;
     }
@@ -60,7 +54,7 @@ export const getUserSeasonNewVideosInfo = async (usid, type) => {
 
     if (type === 'series' && !(meta && meta.name)) {
       const ret = await retryGet(`https://api.bilibili.com/x/series/series?series_id=${sid}`, { timeout: 10000 });
-      meta = _.get(ret, 'data.data.meta');
+      meta = ret?.data?.data?.meta;
     }
 
     // 发
@@ -71,9 +65,8 @@ export const getUserSeasonNewVideosInfo = async (usid, type) => {
   }
 };
 
-const formatSeasonVideo = ({ aid, bvid, pic, stat: { view }, title }, { name } = {}) => `${CQ.img(pic)}
+const formatSeasonVideo = ({ aid, bvid, pic, title }, { name } = {}) => `${CQ.img(pic)}
 av${aid}
 ${CQ.escape(title)}
 合集：${CQ.escape(name)}
-${humanNum(view)}播放
 https://www.bilibili.com/video/${bvid}`;

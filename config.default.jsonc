@@ -35,6 +35,8 @@
     "addFriendAnswers": [],
     // 是否自动同意入群申请（false 则忽略，但不会拒绝，并且可以用命令手动允许，详情请查看“wiki-配置文件说明”）
     "autoAddGroup": false,
+    // 在发送的@后面加上空格，如果客户端没有这么做并且你想加空格则可以开启
+    "spaceAfterAt": false,
     // 图片反和谐方式，0：关闭，1：轻微修改，2：逆时针旋转90°，4：顺时针旋转90°，8：旋转180°
     // 可以进行组合，例如 3 则表示 轻微修改 + 逆时针旋转90° (1+2)；旋转操作之间不能组合，只会执行一个
     "antiShielding": 0,
@@ -42,9 +44,12 @@
     "handleBannedHosts": true,
     // 使用传统方法处理红链
     "handleBannedHostsWithLegacyMethod": false,
+    // 是否禁止搜索纵横比超过该值的图片（例如本子长图，这种通常无法搜到结果），0 则关闭，若设置建议该值 >= 4，若被禁止则回复 bot.replys.stopSearchingByHWRatio
+    // 请注意，启用该项后每次搜索前都需要去下载图片来判断，会产生额外耗时和网络流量（不过图片大小通常不会很大，毕竟 QQ 会压缩），如因网络原因等下载失败则不阻止搜图
+    "stopSearchingHWRatioGt": 0,
     // 隐藏所有搜索结果的缩略图
     "hideImg": false,
-    // saucanao 得到 NSFW 结果时隐藏缩略图，可选 0~3，严格程度依次增加
+    // saucenao 得到 NSFW 结果时隐藏缩略图，可选 0~3，严格程度依次增加
     // 0-不隐藏，1-隐藏明确为 NSFW 的缩略图，2-隐藏明确和可能为 NSFW 的缩略图，3-只显示明确为非 NSFW 的缩略图
     "hideImgWhenSaucenaoNSFW": 0,
     // saucenao 得到低相似度结果时隐藏结果缩略图（包括 ascii2d 和 nhentai）
@@ -53,26 +58,28 @@
     "hideImgWhenWhatanimeR18": false,
     // whatanime 发送预览视频，R18 结果不会发送
     "whatanimeSendVideo": false,
+    // 是否优先从本地上传图片到 whatanime 搜索（否时使用 whatanime 的 URL API）
+    "whatanimeLocalUpload": false,
     // saucenao 默认搜索库，可选值：["all", "pixiv", "danbooru", "doujin", "anime"]
     "saucenaoDefaultDB": "all",
     // saucenao 相似度低于这个百分比将被认定为相似度过低
     "saucenaoLowAcc": 60,
+    // 是否优先从本地上传图片到 saucenao 搜索（否时使用 saucenao 的 URL API）
+    "saucenaoLocalUpload": false,
     // 是否在 saucenao 超额时自动换用 ascii2d
-    "useAscii2dWhenQuotaExcess": true,
+    "useAscii2dWhenQuotaExcess": false,
     // 是否在 saucenao 相似度过低时自动使用 ascii2d
-    "useAscii2dWhenLowAcc": true,
+    "useAscii2dWhenLowAcc": false,
     // 是否在 saucenao 搜索失败时自动使用 ascii2d
-    "useAscii2dWhenFailed": true,
-    // 是否从本地上传图片到 ascii2d 搜索（否时使用 ascii2d 的 URL API）
+    "useAscii2dWhenFailed": false,
+    // 是否优先从本地上传图片到 ascii2d 搜索（否时使用 ascii2d 的 URL API）
     "ascii2dLocalUpload": false,
-    // 是否使用 Puppeteer 请求 ascii2d 以绕过 cf js challenge，详情请看“wiki-配置文件说明-使用 Puppeteer 绕过 cf js challenge”（启用时 ascii2dLocalUpload 配置将不生效）
-    "ascii2dUsePuppeteer": false,
     // saucenao 搜到本子时是否进一步去 nHentai 搜索
     "getDoujinDetailFromNhentai": true,
-    // nHentai 主站有 cf js challenge 无法直接搜索，可以配置使用镜像站搜索，但需注意镜像站收录本子的进度通常落后于主站，设置空字符串则去主站搜索
-    "getDoujinDetailFromNhentaiMirrorSite": "https://nhentai.xxx",
-    // 是否使用 Puppeteer 请求 nHentai 以绕过 cf js challenge，试验阶段，目前可能不解决问题，使用 getDoujinDetailFromNhentaiMirrorSite 时该配置不生效，详情请看“wiki-配置文件说明-使用 Puppeteer 绕过 cf js challenge”
-    "nHentaiUsePuppeteer": false,
+    // 若 nHentai 主站有 cf js challenge 无法直接搜索，可以配置使用镜像站搜索，如 https://nhentai.xxx
+    // 但需注意镜像站收录本子的进度通常落后于主站，设置空字符串则去主站搜索
+    // 不再建议使用，建议使用 FlareSolverr，见设置项 `flaresolverr`
+    "getDoujinDetailFromNhentaiMirrorSite": "",
     // 是否开启搜图反馈，成功接收图片会回复 bot.replys.searchFeedback，可用于判断图片是否被屏蔽
     "searchFeedback": false,
     // 每名用户每日搜索次数限制
@@ -90,14 +97,14 @@
     "groupForwardSearchResult": false,
     // 大部分请求所使用的代理，支持 http(s):// 和 socks://
     "proxy": "",
-    // 绕过 Cloudflare Challenge 所使用的 TLS 版本，建议可选值：["TLSv1.1", "TLSv1.2"]，作用详见 wiki (常见问题 - Ascii2d)
-    "cfTLSVersion": "TLSv1.1",
     // 检查更新间隔（小时），0 则关闭
     "checkUpdate": 24,
     // 是否忽略QQ官方机器人 (2854196300 ≤ qq ≤ 2854216399)
     "ignoreOfficialBot": true,
     // Canvas 库选择，可选值 ["auto", "@napi-rs/canvas", "canvas"] 详见 wiki
     "canvasLibrary": "auto",
+    // 发送消息时不转义普通文本内容，可以解决某些机器人客户端没有严格按照 OneBot 标准进行反转义的问题
+    "disableMessageEscape": false,
     // 搜图结果缓存，开启可节约 API 调用
     "cache": {
       // 是否启用
@@ -114,7 +121,17 @@
       // 复读概率（百分比 0~100）
       "probability": 40,
       // 平时直接复读的概率（百分比 0~100）
-      "commonProb": 0.2
+      "commonProb": 0.2,
+      // 字数大于等于该值的消息不复读，0 禁用
+      "maxWordNum": 50,
+      // 图片数量大于等于该值的消息不复读，0 禁用
+      "maxPicNum": 2,
+      // 复读图文混排的消息
+      "allowMixed": true,
+      // 复读含链接的消息
+      "allowLink": false,
+      // 不复读符合该正则表达式的消息，留空禁用
+      "disallowReg": ""
     },
     // setu 相关功能，部分配置的详细说明请查看“wiki-附加功能-setu”以了解更多
     "setu": {
@@ -143,6 +160,8 @@
       "shortenPximgProxy": "",
       // 是否发送 master1200 大小的图片，以节省流量或加快发送速度，关闭时将发送原图
       "size1200": false,
+      // 是否排除AI作品
+      "excludeAI": false,
       // 发送后这么多秒自动撤回（0 则不撤回，-1 为发送闪照）
       "deleteTime": 60,
       // 群内使用冷却时间（秒），每名用户独立，0 则无冷却，私聊无 cd
@@ -219,12 +238,16 @@
       // 其他不满足发送 setu 的条件
       "setuReject": "很抱歉，该功能暂不开放_(:3」」",
       // setu API 调用达到上限（已弃用）
-      "setuQuotaExceeded": ""
+      "setuQuotaExceeded": "",
+      // 因纵横比过大而不搜索
+      "stopSearchingByHWRatio": "检测到过长图片，停止搜索，请检查该图是否由多张图片拼接而成，如是请手动截取一张进行搜索"
     },
     // OCR 相关设置，请查看“wiki-附加功能-OCR文字识别”以了解更多
     "ocr": {
       // 使用的 OCR 服务，可选值：["qq", "ocr.space", "baidubce", "tencent"]，qq 需要 go-cqhttp
       "use": "qq",
+      // 失败时尝试其他 OCR 服务
+      "fallback": [],
       "ocr.space": {
         "defaultLANG": "eng",
         "apikey": ""
@@ -248,7 +271,9 @@
       // 检查更新间隔（小时），0 则关闭
       "updateInterval": 24,
       // 使用的 OCR 服务，可选值同上面的 bot.ocr.use
-      "ocr": "qq"
+      "ocr": "qq",
+      // 失败时尝试其他 OCR 服务
+      "ocrFallback": []
     },
     // 定时提醒功能设置，请查看“wiki-附加功能-定时提醒”以了解更多
     "reminder": {
@@ -273,18 +298,27 @@
       "getLiveRoomInfo": false,
       // 是否在发送动态时预下载图片（如网络环境不佳，启用该项可能可以解决发图发一半或动图不动情况）
       "dynamicImgPreDl": false,
+      // 自动合并3/6/9宫格图（需要先启用 dynamicImgPreDl）
+      "dynamicMergeImgs": false,
       // 图片预下载超时时间（秒），0 则无超时（不建议，小心永久卡住）
       "imgPreDlTimeout": 30,
+      // 动态链接位置，prepend: 前置，append: 后置，none: 不发送
+      "dynamicLinkPosition": "prepend",
+      // 动态图片数量限制，-1 为无限制，0 则不发送，其他值则最多发送这么多图片，图片数量超出限制时 dynamicMergeImgs 将失效
+      "dynamicImgLimit": -1,
       // 动态和直播开播推送，请查看“wiki-附加功能-哔哩哔哩推送”以了解更多
       // 特别地，该配置项内部的注释不会被清除，以方便对 uid 或 gid 进行备注
       "push": {},
       // 推送检测间隔（秒），最小为 30
       "pushCheckInterval": 60,
+      // 推送时忽略账号转发自己的动态
+      "pushIgnoreForwardingSelf": false,
       // 是否使用动态信息流来检测推送，详见 wiki
       "useFeed": false,
       // 信息流检测间隔（秒），最小为 5
       "feedCheckInterval": 10,
-      // B站账号动态页 cookie，启用 useFeed 时需要
+      // B站账号动态页 cookie，启用 useFeed 时需要，如果解析功能出现 -352 错误也可尝试提供 cookie
+      // 可通过 https://bql.lolicon.app 快捷获取
       "cookie": "",
       // 当发送者撤回原消息时是否同步撤回解析消息
       "respondRecall": true,
@@ -329,7 +363,11 @@
       // 群组白名单（设置后将只允许白名单群组使用）
       "whiteGroup": [],
       // 覆盖配置（详见 wiki）
-      "overrides": []
+      "overrides": [],
+      // 自定义 API 地址，如 https://api.openai.com/v1/completions
+      "customAPI": "",
+      // 自定义 Chat completion API 地址，如 https://api.openai.com/v1/chat/completions
+      "customChatAPI": ""
     },
     // 点赞（需要使用的机器人客户端支持点赞功能）
     "like": {
@@ -364,14 +402,57 @@
       "whiteGroup": []
     }
   },
-  // saucenao 自定义 host，格式：[protocol://]host[:port]
+  // https://github.com/FlareSolverr/FlareSolverr
+  "flaresolverr": {
+    // API 地址
+    "url": "http://127.0.0.1:8191",
+    // 会话名，用于持久化，为空则不使用，不建议为空
+    "session": "cqps",
+    // 代理，见 FlareSolverr 文档；注意：请求缩略图会使用 `bot.proxy` 代理而不是这个代理
+    "proxy": null,
+    // 若你需要修改代理，请改为 `true`，FlareSolverr 需要重新创建 session 才能使用新的代理配置
+    "autoDestroySession": false,
+    // 为 ascii2d 请求使用，启用时 `ascii2dLocalUpload` 不生效
+    "enableForAscii2d": false,
+    // 为 nHentai 请求使用
+    "enableForNHentai": false,
+    // 为 SoutuBot 请求使用
+    "enableForSoutuBot": false
+  },
+  // https://github.com/sarperavci/CloudflareBypassForScraping
+  "cloudflareBypassForScraping": {
+    // API 地址
+    "url": "http://127.0.0.1:8000",
+    // 代理
+    "proxy": "",
+    // 为 ascii2d 请求使用，启用时 `ascii2dLocalUpload` 不生效
+    "enableForAscii2d": false,
+    // 为 nHentai 请求使用
+    "enableForNHentai": false,
+    // 为 SoutuBot 请求使用
+    "enableForSoutuBot": false
+  },
+  // 开启后每天会备份所有群的群成员信息到 data/groupMemberBackup 目录，若意外炸群可用于秽土转生，备份只会保留近 30 天的
+  "backupGroupMember": {
+    // 是否开启
+    "enable": false,
+    // 备份格式，可选值 ["csv", "json"]，csv 可直接用 excel 查看或导入腾讯文档之类的在线文档
+    "format": "csv",
+    // 白名单：设置后将仅备份这些群，优先于黑名单，数字或字符串均可
+    "whitelist": [],
+    // 黑名单：设置后将排除这些群，数字或字符串均可
+    "blacklist": []
+  },
+  // saucenao 自定义 host，格式：[protocol://]host[:port]，不写明协议默认为 https
   "saucenaoHost": "saucenao.com",
   // saucenao APIKEY，必填，否则无法使用 saucenao 搜图
   "saucenaoApiKey": "",
-  // whatanime 自定义 host，格式：[protocol://]host[:port]
+  // whatanime 自定义 host，格式：[protocol://]host[:port]，不写明协议默认为 https
   "whatanimeHost": "api.trace.moe",
   // whatanime Token，选填
   "whatanimeToken": "",
-  // ascii2d 自定义 host，格式：[protocol://]host[:port]
-  "ascii2dHost": "ascii2d.net"
+  // ascii2d 自定义 host，格式：[protocol://]host[:port]，不写明协议默认为 https
+  "ascii2dHost": "ascii2d.net",
+  // 只是提供个配置
+  "setuApiHost": "api.lolicon.app"
 }
